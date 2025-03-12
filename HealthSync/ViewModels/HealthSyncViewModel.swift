@@ -9,6 +9,8 @@ class HealthSyncViewModel: ObservableObject {
     @Published var currentFastingWindow: HealthData.FastingWindow?
     @Published var todaySupplements: [HealthData.SupplementLog] = []
     @Published var aiInsights: [HealthData.CoachingInsight] = []
+    @Published var fastingProgress: Double = 0
+    @Published var fastingTimeRemaining: String = "--:--:--"
     
     // MARK: - Services
     private let whoopService = WhoopService.shared
@@ -17,10 +19,41 @@ class HealthSyncViewModel: ObservableObject {
     
     // MARK: - Initialization
     init() {
-        setupHealthKitAuthorization()
-        loadUserProfile()
-        startDataSync()
+    setupHealthKitAuthorization()
+    loadUserProfile()
+    setupFastingTimer()  // Add this line
+    startDataSync()
+}
+    private func setupFastingTimer() {
+
+    // Check for existing fasting window
+    if let window = fastingManager.getCurrentFastingWindow(), !window.completed {
+        currentFastingWindow = window
+        startFastingTimer()
+    } else {
+        updateFastingWindow()
     }
+}
+
+    private func startFastingTimer() {
+
+    // Cancel any existing timer
+    fastingTimer?.invalidate()
+    
+    // Create a new timer that fires every second
+    fastingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        self?.updateFastingTimerDisplay()
+    }
+}
+
+    private func updateFastingTimerDisplay() {
+    guard let window = currentFastingWindow else { return }
+    
+    DispatchQueue.main.async {
+        self.fastingTimeRemaining = self.fastingManager.formattedTimeRemaining(for: window)
+        self.fastingProgress = self.fastingManager.progressPercentage(for: window)
+    }
+}
     
     // MARK: - Setup Methods
     private func setupHealthKitAuthorization() {
@@ -106,13 +139,17 @@ class HealthSyncViewModel: ObservableObject {
     }
     
     // MARK: - Fasting Management
-    private func updateFastingWindow() {
+    func updateFastingWindow() {
         let calendar = Calendar.current
         let now = Date()
         
         // Default fasting window (16:8)
-        let fastingStart = calendar.date(bySettingHour: 20, minute: 0, second: 0, of: now)!
-        let fastingEnd = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: now)!
+        var fastingStart = calendar.date(bySettingHour: 20, minute: 0, second: 0, of: now)!
+        var fastingEnd = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: now)!
+
+        if fastingEnd < fastingStart {
+        fastingEnd = calendar.date(byAdding: .day, value: 1, to: fastingEnd)!
+    }
         
         let window = HealthData.FastingWindow(
             startTime: fastingStart,
@@ -122,10 +159,23 @@ class HealthSyncViewModel: ObservableObject {
             completed: false
         )
         
-        DispatchQueue.main.async {
-            self.currentFastingWindow = window
-        }
+        fastingManager.setFastingWindow(window)
+        currentFastingWindow = window
+        startFastingTimer()
+
+        func startFasting(duration: TimeInterval = 16 * 3600) {
+        let window = fastingManager.startFast(duration: duration)
+        currentFastingWindow = window
+        startFastingTimer()
+}
+
+        func endFasting() {
+        if let updated = fastingManager.endFast() {
+        currentFastingWindow = updated
+        fastingTimer?.invalidate()
+        fastingTimer = nil
     }
+}
     
     // MARK: - Supplement Management
     private func updateSupplementSchedule() {
