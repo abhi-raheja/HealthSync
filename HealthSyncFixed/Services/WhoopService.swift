@@ -1,13 +1,9 @@
 import Foundation
-import Combine
 
-class WhoopService: ObservableObject {
+class WhoopService {
     static let shared = WhoopService()
     private let baseURL = "https://api.prod.whoop.com/developer/v1"
     private let authService = WhoopAuthService.shared
-    
-    // For Combine publishers
-    private var cancellables = Set<AnyCancellable>()
     
     // MARK: - Initialization
     private init() {
@@ -18,39 +14,15 @@ class WhoopService: ObservableObject {
             name: WhoopAuthService.authStateChangedNotification,
             object: nil
         )
-        
-        // Initialize connection status based on current auth state
-        updateConnectionStatusFromAuthState()
     }
     
     deinit {
         NotificationCenter.default.removeObserver(self)
-        cancellables.forEach { $0.cancel() }
     }
     
     @objc private func handleAuthStateChanged() {
-        // Update connection status when auth state changes
-        updateConnectionStatusFromAuthState()
-        
-        // If we just became authenticated, we could automatically refresh data
-        if authService.isAuthenticated {
-            // This could trigger data refresh in a real app
-            // For example: Task { try? await refreshData() }
-        }
-    }
-    
-    private func updateConnectionStatusFromAuthState() {
-        switch authService.authState {
-        case .authenticated:
-            updateConnectionStatus(.connected)
-        case .authenticating:
-            updateConnectionStatus(.connecting)
-        case .failed(let error):
-            let errorMessage = handleAuthError(error)
-            updateConnectionStatus(.error(errorMessage))
-        case .notAuthenticated:
-            updateConnectionStatus(.disconnected)
-        }
+        // This could trigger additional logic when auth state changes
+        // For example, refreshing data if authenticated or clearing cache if not
     }
     
     // MARK: - Connection Status
@@ -68,44 +40,15 @@ class WhoopService: ObservableObject {
     }
     
     // MARK: - Authentication
-    
-    /// Generate an authorization URL for the OAuth2 authorization code flow
-    func generateAuthorizationURL(redirectURI: String = "https://abhiraheja.com", state: String = UUID().uuidString) -> URL? {
-        return authService.generateAuthorizationURL(redirectURI: redirectURI, state: state)
-    }
-    
-    /// Connect with optional authorization code
-    /// - Parameter code: Optional authorization code from OAuth redirect
-    /// - Parameter redirectURI: The redirect URI used during authorization
-    /// - Returns: Whether the connection was successful
-    func connect(withCode code: String? = nil, redirectURI: String = "https://abhiraheja.com") async throws -> Bool {
+    func connect() async throws -> Bool {
         updateConnectionStatus(.connecting)
         
         do {
-            if let code = code {
-                // Use authorization code flow with the provided code
-                try await authService.authenticateWithAuthorizationCode(
-                    code: code, 
-                    redirectURI: redirectURI
-                )
-            } else {
-                // Only attempt client credentials if explicitly configured to do so
-                // This is generally not recommended for WHOOP's API which prefers authorization code flow
-                try await authService.authenticateWithClientCredentials()
-            }
-            
-            // Verify that we're actually authenticated
-            if authService.isAuthenticated {
-                updateConnectionStatus(.connected)
-                
-                // After successful authentication, we could fetch user profile
-                _ = try? await fetchUserProfile()
-                
-                return true
-            } else {
-                updateConnectionStatus(.error("Authentication response did not result in valid session"))
-                return false
-            }
+            // For testing purposes, using client credentials flow
+            // In production, this should use authorization code flow
+            try await authService.authenticateWithClientCredentials()
+            updateConnectionStatus(.connected)
+            return true
         } catch {
             let errorMessage = handleAuthError(error)
             updateConnectionStatus(.error(errorMessage))
@@ -116,16 +59,6 @@ class WhoopService: ObservableObject {
     func disconnect() {
         authService.clearTokens()
         updateConnectionStatus(.disconnected)
-    }
-    
-    /// Fetch the user profile from WHOOP
-    /// - Returns: The user profile information
-    func fetchUserProfile() async throws -> WhoopAuthService.WhoopUserProfile {
-        guard authService.isAuthenticated else {
-            throw APIError.authenticationRequired
-        }
-        
-        return try await authService.fetchUserInfo()
     }
     
     private func handleAuthError(_ error: Error) -> String {
@@ -139,18 +72,11 @@ class WhoopService: ObservableObject {
                 return "WHOOP server error. Please try again later."
             case .noRefreshToken:
                 return "Authentication session expired. Please reconnect your account."
-            case .networkError(let innerError):
-                if let urlError = innerError as? URLError {
-                    if urlError.code == .notConnectedToInternet {
-                        return "No internet connection. Please check your network settings."
-                    } else {
-                        return "Network error: \(urlError.localizedDescription)"
-                    }
-                }
+            case .networkError:
                 return "Network error. Please check your internet connection."
             }
         }
-        return "Authentication error: \(error.localizedDescription)"
+        return "Unknown error: \(error.localizedDescription)"
     }
     
     private func updateConnectionStatus(_ status: ConnectionStatus) {
@@ -488,27 +414,12 @@ extension WhoopService {
 
 // MARK: - Networking
 extension WhoopService {
-    enum APIError: Error, LocalizedError {
+    enum APIError: Error {
         case invalidURL
         case invalidResponse
         case authenticationRequired
         case dataNotAvailable
         case networkError(Error)
-        
-        var errorDescription: String? {
-            switch self {
-            case .invalidURL:
-                return "Invalid API URL"
-            case .invalidResponse:
-                return "Invalid response from server"
-            case .authenticationRequired:
-                return "Authentication required"
-            case .dataNotAvailable:
-                return "Requested data is not available"
-            case .networkError(let error):
-                return "Network error: \(error.localizedDescription)"
-            }
-        }
     }
     
     private func performRequest<T: Codable>(_ endpoint: String) async throws -> T {
@@ -524,12 +435,7 @@ extension WhoopService {
         // Check if token needs to be refreshed
         if authService.isTokenExpired {
             // Try to refresh the token
-            do {
-                try await authService.refreshAccessToken()
-            } catch {
-                // If refresh fails, throw authentication error
-                throw APIError.authenticationRequired
-            }
+            try await authService.refreshAccessToken()
             
             // Check again after refresh attempt
             guard let refreshedToken = authService.accessToken else {
@@ -537,11 +443,11 @@ extension WhoopService {
             }
             
             // Use the refreshed token
-            let request = createAuthenticatedRequest(url: url, token: refreshedToken)
+            var request = createAuthenticatedRequest(url: url, token: refreshedToken)
             return try await performNetworkRequest(request: request)
         } else {
             // Use the existing token
-            let request = createAuthenticatedRequest(url: url, token: accessToken)
+            var request = createAuthenticatedRequest(url: url, token: accessToken)
             return try await performNetworkRequest(request: request)
         }
     }
@@ -567,34 +473,20 @@ extension WhoopService {
                 throw APIError.authenticationRequired
             }
             
-            if httpResponse.statusCode == 429 {
-                // Rate limited
-                throw APIError.invalidResponse
-            }
-            
             guard (200...299).contains(httpResponse.statusCode) else {
-                // Try to get a more specific error message
-                if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
-                   let errorMessage = errorData["error"] ?? errorData["message"] {
-                    throw NSError(domain: "WhoopAPI", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMessage])
-                }
                 throw APIError.invalidResponse
             }
             
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             
-            do {
-                return try decoder.decode(T.self, from: data)
-            } catch let decodingError {
-                print("Decoding error: \(decodingError)")
-                throw APIError.invalidResponse
-            }
+            return try decoder.decode(T.self, from: data)
+        } catch let decodingError as DecodingError {
+            print("Decoding error: \(decodingError)")
+            throw APIError.invalidResponse
         } catch let urlError as URLError {
             print("URL error: \(urlError)")
             throw APIError.networkError(urlError)
-        } catch let apiError as APIError {
-            throw apiError
         } catch {
             print("Unknown error: \(error)")
             throw APIError.networkError(error)

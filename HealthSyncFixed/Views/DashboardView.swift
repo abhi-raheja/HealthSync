@@ -48,9 +48,6 @@ struct HomeView: View {
                     // Recovery & Strain Card
                     RecoveryCard(whoopMetrics: viewModel.whoopMetrics)
                     
-                    // HealthKit Activity Data Card
-                    HealthActivityCard(viewModel: viewModel)
-                    
                     // Fasting Timer
                     FastingTimerCard(
                         fastingWindow: viewModel.currentFastingWindow,
@@ -69,16 +66,7 @@ struct HomeView: View {
                 .padding()
             }
             .navigationTitle("Dashboard")
-            .navigationBarItems(trailing: HStack(spacing: 16) {
-                NavigationLink(destination: HealthDataView().environmentObject(viewModel)) {
-                    Image(systemName: "heart.text.square.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.blue)
-                        .frame(width: 30, height: 30)
-                }
-                
-                notificationsButton
-            })
+            .navigationBarItems(trailing: notificationsButton)
             .background(colorScheme == .dark ? Color.black.opacity(0.9) : Color.gray.opacity(0.1))
         }
     }
@@ -94,153 +82,6 @@ struct HomeView: View {
                 .background(Circle().fill(Color(.systemBackground)))
                 .shadow(radius: 2)
         }
-    }
-}
-
-// MARK: - HealthKit Activity Card
-struct HealthActivityCard: View {
-    @ObservedObject var viewModel: HealthSyncViewModel
-    
-    var body: some View {
-        VStack(spacing: 15) {
-            HStack {
-                Text("Today's Activity")
-                    .font(.headline)
-                
-                Spacer()
-                
-                NavigationLink(destination: HealthDataView().environmentObject(viewModel)) {
-                    Label("Details", systemImage: "chevron.right")
-                        .font(.caption)
-                        .foregroundColor(.blue)
-                }
-            }
-            
-            if let activity = viewModel.todayActivity {
-                HStack(spacing: 20) {
-                    // Steps
-                    ActivityMetricView(
-                        icon: "figure.walk",
-                        value: "\(activity.steps)",
-                        label: "Steps",
-                        color: .green
-                    )
-                    
-                    // Active Energy
-                    ActivityMetricView(
-                        icon: "flame.fill",
-                        value: "\(Int(activity.activeEnergyBurned))",
-                        label: "Calories",
-                        color: .orange
-                    )
-                    
-                    // Exercise Minutes
-                    ActivityMetricView(
-                        icon: "clock",
-                        value: "\(activity.exerciseMinutes)",
-                        label: "Exercise",
-                        color: .blue
-                    )
-                }
-                
-                // Add latest workout if available
-                if let latestWorkout = viewModel.recentWorkouts.first {
-                    HStack {
-                        Image(systemName: workoutIcon(for: latestWorkout.type))
-                            .foregroundColor(.blue)
-                            .frame(width: 28, height: 28)
-                            .background(Color.blue.opacity(0.1))
-                            .clipShape(Circle())
-                        
-                        Text("Latest: \(latestWorkout.type)")
-                            .font(.caption)
-                        
-                        Spacer()
-                        
-                        Text("\(Int(latestWorkout.caloriesBurned)) kcal")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.top, 8)
-                }
-            } else if viewModel.isHealthKitAuthorized {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                        .padding()
-                    Spacer()
-                }
-            } else {
-                Button(action: {
-                    // Request HealthKit authorization
-                    viewModel.setupHealthKitAuthorization()
-                }) {
-                    HStack {
-                        Image(systemName: "heart.text.square")
-                        Text("Connect Apple Health")
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-                }
-                .padding(.vertical, 8)
-            }
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(radius: 2)
-    }
-    
-    private func workoutIcon(for workoutType: String) -> String {
-        switch workoutType.lowercased() {
-        case "running":
-            return "figure.run"
-        case "cycling":
-            return "figure.outdoor.cycle"
-        case "swimming":
-            return "figure.pool.swim"
-        case "walking":
-            return "figure.walk"
-        case "hiking":
-            return "figure.hiking"
-        case "strength training", "weight training":
-            return "dumbbell"
-        case "yoga":
-            return "figure.mind.and.body"
-        case "hiit", "functional training":
-            return "figure.highintensity.intervaltraining"
-        default:
-            return "figure.mixed.cardio"
-        }
-    }
-}
-
-struct ActivityMetricView: View {
-    let icon: String
-    let value: String
-    let label: String
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundColor(color)
-            
-            Text(value)
-                .font(.system(size: 15, weight: .bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            
-            Text(label)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
     }
 }
 
@@ -930,22 +771,8 @@ struct TrackingView: View {
     
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Tracking View - Coming soon")
-                
-                NavigationLink(destination: HealthDataView().environmentObject(viewModel)) {
-                    HStack {
-                        Image(systemName: "heart.text.square.fill")
-                        Text("Health Data")
-                    }
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-                }
-                .padding(.top, 20)
-            }
-            .navigationTitle("Track")
+            Text("Tracking View - Coming soon")
+                .navigationTitle("Track")
         }
     }
 }

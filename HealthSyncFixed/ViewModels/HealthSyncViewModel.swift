@@ -12,13 +12,6 @@ class HealthSyncViewModel: ObservableObject {
     @Published var fastingProgress: Double = 0
     @Published var fastingTimeRemaining: String = "--:--:--"
     
-    // New HealthKit-related properties
-    @Published var todayActivity: HealthData.ActivitySummary?
-    @Published var recentWorkouts: [HealthData.WorkoutSession] = []
-    @Published var lastNightSleep: HealthData.SleepData?
-    @Published var healthMetrics: HealthData.HealthMetrics?
-    @Published var isHealthKitAuthorized: Bool = false
-    
     // MARK: - Services
     private let whoopService = WhoopService.shared
     private let healthKitManager = HealthKitManager.shared
@@ -36,28 +29,6 @@ class HealthSyncViewModel: ObservableObject {
         loadUserProfile()
         setupFastingTimer()
         startDataSync()
-        
-        // Set up notification observer for HealthKit data updates
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleHealthDataUpdate),
-            name: .newHealthDataAvailable,
-            object: nil
-        )
-    }
-    
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-        fastingTimer?.invalidate()
-        fastingTimer = nil
-        
-        // Clean up HealthKit observers
-        healthKitManager.cleanup()
-    }
-    
-    @objc private func handleHealthDataUpdate() {
-        // Refresh health data when notification is received
-        fetchHealthKitData()
     }
     
     private func migrateDataIfNeeded() {
@@ -100,17 +71,10 @@ class HealthSyncViewModel: ObservableObject {
     
     // MARK: - Setup Methods
     private func setupHealthKitAuthorization() {
-        healthKitManager.requestAuthorization { [weak self] success, error in
-            guard let self = self else { return }
-            
-            DispatchQueue.main.async {
-                self.isHealthKitAuthorized = success
-            }
-            
+        healthKitManager.requestAuthorization { success, error in
             if success {
                 print("HealthKit authorization successful")
                 self.fetchHealthKitData()
-                self.healthKitManager.enableBackgroundUpdates()
             } else {
                 print("HealthKit authorization failed: \(error?.localizedDescription ?? "Unknown error")")
             }
@@ -178,12 +142,6 @@ class HealthSyncViewModel: ObservableObject {
         DispatchQueue.main.async {
             self.aiInsights = insights
         }
-        
-        // Load workouts
-        let workouts = coreDataManager.getRecentWorkouts()
-        DispatchQueue.main.async {
-            self.recentWorkouts = workouts
-        }
     }
     
     private func syncAllData() {
@@ -197,9 +155,6 @@ class HealthSyncViewModel: ObservableObject {
                 
                 // Save to CoreData
                 coreDataManager.saveWhoopMetrics(metrics: metrics)
-                
-                // Fetch HealthKit data
-                fetchHealthKitData()
                 
                 // Generate AI insights based on new data
                 await generateAIInsights()
@@ -215,112 +170,18 @@ class HealthSyncViewModel: ObservableObject {
         }
     }
     
-    // MARK: - HealthKit Data Fetching
-    private func fetchHealthKitData() {
-        // Fetch all health data
-        healthKitManager.fetchAllHealthData { [weak self] in
-            self?.fetchActivityData()
-            self?.fetchWorkoutsData()
-            self?.fetchSleepData()
-            self?.fetchHealthMetricsData()
-        }
-    }
-    
-    private func fetchActivityData() {
-        healthKitManager.fetchTodayActivity { [weak self] activity in
-            guard let self = self, let activity = activity else { return }
-            
-            DispatchQueue.main.async {
-                self.todayActivity = activity
-            }
-            
-            // Save to CoreData if needed
-            // This would typically be implemented in the CoreDataManager
-        }
-    }
-    
-    private func fetchWorkoutsData() {
-        healthKitManager.fetchRecentWorkouts { [weak self] workouts in
-            guard let self = self else { return }
-            
-            DispatchQueue.main.async {
-                self.recentWorkouts = workouts
-            }
-            
-            // Save to CoreData
-            for workout in workouts {
-                self.coreDataManager.saveWorkoutSession(workout: workout)
-            }
-        }
-    }
-    
-    private func fetchSleepData() {
-        healthKitManager.fetchLastNightSleep { [weak self] sleepData in
-            guard let self = self, let sleepData = sleepData else { return }
-            
-            DispatchQueue.main.async {
-                self.lastNightSleep = sleepData
-            }
-            
-            // Save to CoreData if needed
-            // This would typically be implemented in the CoreDataManager
-        }
-    }
-    
-    private func fetchHealthMetricsData() {
-        healthKitManager.fetchHealthMetrics { [weak self] metrics in
-            guard let self = self, let metrics = metrics else { return }
-            
-            DispatchQueue.main.async {
-                self.healthMetrics = metrics
-            }
-            
-            // Save to CoreData if needed
-            // This would typically be implemented in the CoreDataManager
-        }
-    }
-    
     // MARK: - AI Insights
     private func generateAIInsights() async {
-        // Collect all available data for insights
-        let whoopData = whoopMetrics
-        let activityData = todayActivity
-        let sleepData = lastNightSleep
+        guard let metrics = whoopMetrics else { return }
         
         var newInsights: [HealthData.CoachingInsight] = []
         
-        // Generate insights based on WHOOP recovery if available
-        if let metrics = whoopData, metrics.recovery < 33 {
+        // Example insight generation based on WHOOP metrics
+        if metrics.recovery < 33 {
             let insight = HealthData.CoachingInsight(
                 date: Date(),
                 type: "recovery",
                 message: "Your recovery is low. Consider a light workout or active recovery today.",
-                actionRequired: true,
-                completed: nil
-            )
-            
-            newInsights.append(insight)
-        }
-        
-        // Generate insights based on sleep if available
-        if let sleep = sleepData, sleep.quality < 70 {
-            let insight = HealthData.CoachingInsight(
-                date: Date(),
-                type: "sleep",
-                message: "Your sleep quality was below optimal. Focus on improving sleep hygiene tonight.",
-                actionRequired: true,
-                completed: nil
-            )
-            
-            newInsights.append(insight)
-        }
-        
-        // Generate insights based on activity if available
-        if let activity = activityData, activity.steps < 5000 {
-            let insight = HealthData.CoachingInsight(
-                date: Date(),
-                type: "activity",
-                message: "You're not meeting your daily step goal. Take a short walk to increase activity.",
                 actionRequired: true,
                 completed: nil
             )
@@ -430,40 +291,8 @@ class HealthSyncViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Public Health Data Methods
-    
-    /// Manually triggers a refresh of all health data
-    func refreshHealthData() {
-        fetchHealthKitData()
-    }
-    
-    /// Returns formatted metrics for display
-    func formattedHealthMetrics() -> [String: String] {
-        var metrics: [String: String] = [:]
-        
-        // Activity metrics
-        if let activity = todayActivity {
-            metrics["steps"] = "\(activity.steps)"
-            metrics["activeCalories"] = "\(Int(activity.activeEnergyBurned)) kcal"
-            metrics["exerciseMinutes"] = "\(activity.exerciseMinutes) min"
-        }
-        
-        // WHOOP metrics
-        if let whoop = whoopMetrics {
-            metrics["recovery"] = "\(Int(whoop.recovery))%"
-            metrics["strain"] = String(format: "%.1f", whoop.strain)
-            metrics["restingHR"] = "\(Int(whoop.restingHeartRate)) bpm"
-            metrics["hrv"] = "\(Int(whoop.hrv)) ms"
-        }
-        
-        // Sleep metrics
-        if let sleep = lastNightSleep {
-            let hours = Int(sleep.duration / 3600)
-            let minutes = Int((sleep.duration.truncatingRemainder(dividingBy: 3600)) / 60)
-            metrics["sleepDuration"] = "\(hours)h \(minutes)m"
-            metrics["sleepQuality"] = "\(Int(sleep.quality))%"
-        }
-        
-        return metrics
+    // MARK: - Health Data Management
+    private func fetchHealthKitData() {
+        // Implement HealthKit data fetching
     }
 }
